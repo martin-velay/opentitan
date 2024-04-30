@@ -217,7 +217,7 @@ class hmac_base_vseq extends cip_base_vseq #(.CFG_T               (hmac_env_cfg)
       `uvm_info(`gfn, $sformatf("wr_addr = %0h, wr_mask = %0h, words = 0x%0h",
                                 wr_addr, wr_mask, word), UVM_LOW)
       tl_access(.addr(cfg.ral.get_addr_from_offset(wr_addr)),
-                .write(1'b1), .data(word), .mask(wr_mask), .blocking(non_blocking));
+                .write(1'b1), .data(word), .mask(wr_mask), .blocking(1));
       bits_written += $countones(wr_mask) * 8;
 
       `uvm_info(`gfn, $sformatf("bits written: %0d", bits_written), UVM_HIGH)
@@ -269,7 +269,6 @@ class hmac_base_vseq extends cip_base_vseq #(.CFG_T               (hmac_env_cfg)
       end
     end
     // ensure all msg fifo are written before trigger hmac_process
-    csr_utils_pkg::wait_no_outstanding_access();
     if ($urandom_range(0, 1)) rd_msg_length();
     read_status_intr_clr();
   endtask
@@ -292,7 +291,7 @@ class hmac_base_vseq extends cip_base_vseq #(.CFG_T               (hmac_env_cfg)
                                     wr_addr, wr_mask, word), UVM_HIGH)
           `DV_CHECK_FATAL(randomize(wr_addr, wr_mask) with {wr_mask == '1;})
           tl_access(.addr(cfg.ral.get_addr_from_offset(wr_addr)),
-                    .write(1'b1), .data(word), .mask(wr_mask), .blocking($urandom_range(0, 1)));
+                    .write(1'b1), .data(word), .mask(wr_mask), .blocking(1));
         end
         // Expected error as we may not push message into the FIFO while SHA is disabled
         if (!ral.cfg.sha_en.get_mirrored_value()) begin
@@ -302,7 +301,6 @@ class hmac_base_vseq extends cip_base_vseq #(.CFG_T               (hmac_env_cfg)
         wr_msg(msg_q);
         break;
       end
-      csr_utils_pkg::wait_no_outstanding_access();
       if ($urandom_range(0, 1)) rd_msg_length();
       read_status_intr_clr();
     end
@@ -329,7 +327,6 @@ class hmac_base_vseq extends cip_base_vseq #(.CFG_T               (hmac_env_cfg)
   // read status and interrupt state and clear the interrupt state
   virtual task read_status_intr_clr();
     bit [TL_DW-1:0] rdata;
-    csr_utils_pkg::wait_no_outstanding_access();
     csr_rd(ral.status, rdata);
     csr_rd(ral.intr_state, rdata);
     csr_wr(.ptr(ral.intr_state), .value(rdata));
@@ -341,7 +338,6 @@ class hmac_base_vseq extends cip_base_vseq #(.CFG_T               (hmac_env_cfg)
   // will leave the checking to scoreboard
   virtual task check_error_code(bit check_err = 1);
     bit [TL_DW-1:0] error_code;
-    csr_utils_pkg::wait_no_outstanding_access();
     if (check_err) begin
       if (ral.intr_enable.hmac_err.get_mirrored_value()) begin
         check_interrupts(.interrupts((1 << HmacErr)), .check_set(1'b1));
