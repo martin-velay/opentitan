@@ -63,6 +63,9 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
         end else if (hmac_start && !cfg.under_reset) begin
           bit [7:0] bytes[4];
           bit [7:0] msg[$];
+          // Register coverage for the fact that a write occurs to the message FIFO during
+          // a compression round
+          if (cfg.en_cov) cov.wr_msg_during_hash_cg.sample(1);
           {<<byte{bytes}} = item.a_data;
           // do endian swap in the word according to the mask, then push to the msg queue
           foreach (item.a_mask[i]) begin
@@ -92,10 +95,9 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
                 previous_digest_size = ral.cfg.digest_size.get_mirrored_value();
                 previous_digest_swap = ral.cfg.digest_swap.get_mirrored_value();
 
-                `uvm_info(`gfn, $sformatf(
-                          "Setting previous digest and digest swap: %4b",
-                           previous_digest_size), UVM_HIGH)
-
+                `uvm_info(`gfn, $sformatf("Setting previous digest and digest swap: %4b",
+                                          previous_digest_size),
+                          UVM_HIGH)
               end
             end else if (item.a_data[HashStart] == 1) begin
               if (!sha_en) begin
@@ -123,11 +125,19 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
             // Do nothing
           end
           "cfg": begin
-            if (hmac_start) return; // won't update configs if hash start
+            if (hmac_start) begin
+              if (cfg.en_cov) cov.wr_config_during_hash_cg.sample(1);
+              return; // won't update configs if hash start
+            end
             if (cfg.en_cov) cov.cfg_cg.sample(item.a_data);
+            // Changing the key length should be seamless while HMAC disabled
+            if (!item.a_data[HmacEn] && (item.a_data[KeyLengthMsb:KeyLengthLsb] !==
+                                         ral.cfg.key_length.get_mirrored_value())) begin
+              if (cfg.en_cov) cov.wr_key_during_sha_only_cg.sample(1);
+            end
             if (sha_en && !item.a_data[ShaEn]) begin
               // Digest gets cleared on disabling.
-              exp_digest = {default: '0};
+              exp_digest = '{default: 0};
             end
             sha_en = item.a_data[ShaEn];
           end
@@ -138,23 +148,21 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
             int key_idx = get_key_index(csr_name);
 
             if (hmac_start) begin
+              if (cfg.en_cov) cov.wr_key_during_hash_cg.sample(1);
               update_err_intr_code(SwUpdateSecretKeyInProcess);
               return;
             end
 
             key[key_idx] = item.a_data;
           end
-          "wipe_secret", "intr_enable", "intr_state", "alert_test": begin
+          "wipe_secret", "intr_enable", "intr_state", "alert_test", "status": begin
             // Do nothing
           end
+          "digest_0", "digest_1", "digest_2", "digest_3", "digest_4", "digest_5", "digest_6",
           "digest_7", "digest_8", "digest_9", "digest_10", "digest_11", "digest_12", "digest_13",
-          "digest_14", "digest_15", "status", "msg_length_upper", "msg_length_lower": begin
+          "digest_14", "digest_15", "msg_length_upper", "msg_length_lower": begin
             // Predict updated value coming from write iff SHA core is disabled.
             do_predict = !sha_en;
-          end
-          "status": begin
-            `uvm_error(`gfn, $sformatf("this reg does not have write access: %0s",
-                                       csr.get_full_name()))
           end
           default: begin
             `uvm_fatal(`gfn, $sformatf("invalid csr: %0s", csr.get_full_name()))
@@ -179,19 +187,19 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
 
     // predict status based on csr read addr channel
     if (!write && channel != DataChannel) begin
-        if (csr_name == "status") begin
-          bit [5:0]       hmac_fifo_depth  = hmac_wr_cnt - hmac_rd_cnt;
-          bit             hmac_fifo_full   = hmac_fifo_depth == HMAC_MSG_FIFO_DEPTH;
-          bit             hmac_fifo_empty  = hmac_fifo_depth == 0;
-          bit [TL_DW-1:0] hmac_status_data = (hmac_fifo_empty << HmacStaMsgFifoEmpty) |
-                                             (hmac_fifo_full  << HmacStaMsgFifoFull) |
-                                             (hmac_fifo_depth << HmacStaMsgFifoDepth);
-          void'(ral.status.predict(.value(hmac_status_data), .kind(UVM_PREDICT_READ)));
-        end else if (csr_name == "intr_state") begin
-          if (fifo_empty && ral.intr_state.fifo_empty.get_mirrored_value() != 1) begin
-            void'(ral.intr_state.fifo_empty.predict(.value(1), .kind(UVM_PREDICT_READ)));
-          end
+      if (csr_name == "status") begin
+        bit [5:0]       hmac_fifo_depth  = hmac_wr_cnt - hmac_rd_cnt;
+        bit             hmac_fifo_full   = hmac_fifo_depth == HMAC_MSG_FIFO_DEPTH;
+        bit             hmac_fifo_empty  = hmac_fifo_depth == 0;
+        bit [TL_DW-1:0] hmac_status_data = (hmac_fifo_empty << HmacStaMsgFifoEmpty) |
+                                           (hmac_fifo_full  << HmacStaMsgFifoFull)  |
+                                           (hmac_fifo_depth << HmacStaMsgFifoDepthLsb);
+        void'(ral.status.predict(.value(hmac_status_data), .kind(UVM_PREDICT_READ)));
+      end else if (csr_name == "intr_state") begin
+        if (fifo_empty && ral.intr_state.fifo_empty.get_mirrored_value() != 1) begin
+          void'(ral.intr_state.fifo_empty.predict(.value(1), .kind(UVM_PREDICT_READ)));
         end
+      end
       return;
     end
 
@@ -233,6 +241,9 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
           // digest_swap is zero.
           bit [TL_DW-1:0] real_digest_val;
 
+          // Read and check DIGEST while HMAC is enabled/disabled
+          if (cfg.en_cov) cov.rd_digest_during_hmac_en_cg.sample(`gmv(ral.cfg.hmac_en));
+
           // TODO: will need this chunk of code if we decide to hold the previous digest
           // value after HMAC is configured with new size etc. when doing DV for
           // the new digest sizes
@@ -259,9 +270,9 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
           // decide whether to assume previous or new digest size to compare correctly
           // with the expected digest
           if (previous_digest_size != ral.cfg.digest_size.get_mirrored_value()) begin
-              expected_digest_size = previous_digest_size;
+            expected_digest_size = previous_digest_size;
           end else begin
-              expected_digest_size = ral.cfg.digest_size.get_mirrored_value();
+            expected_digest_size = ral.cfg.digest_size.get_mirrored_value();
           end
 
           `uvm_info(`gfn, $sformatf(
@@ -322,9 +333,18 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
           if (!do_cycle_accurate_check) do_read_check = 0;
           if (cfg.en_cov) cov.status_cg.sample(item.d_data, ral.cfg.get_mirrored_value());
         end
+        "msg_length_lower": begin
+          if (cfg.en_cov) begin
+            cov.msg_len_cg.sample(.msg_len_lower(item.d_data),
+                                  .msg_len_upper('x),
+                                  .cfg(ral.cfg.get_mirrored_value()));
+          end
+        end
         "msg_length_upper": begin
           if (cfg.en_cov) begin
-            cov.msg_len_cg.sample(item.d_data, ral.cfg.get_mirrored_value());
+            cov.msg_len_cg.sample(.msg_len_lower('x),
+                                  .msg_len_upper(item.d_data),
+                                  .cfg(ral.cfg.get_mirrored_value()));
           end
         end
         "err_code": if (cfg.en_cov) cov.err_code_cg.sample(item.d_data);
@@ -332,7 +352,7 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
         "key_10", "key_11", "key_12", "key_13", "key_14", "key_15", "key_16", "key_17", "key_18",
         "key_19", "key_20", "key_21", "key_22", "key_23", "key_24", "key_25", "key_26", "key_27",
         "key_28", "key_29", "key_30", "key_31", "cfg", "cmd", "intr_enable", "intr_test",
-        "wipe_secret", "msg_length_lower", "alert_test": begin
+        "wipe_secret", "alert_test": begin
           // Do nothing
         end
         default: begin
@@ -343,7 +363,7 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
       //if (do_read_check) begin
       //  `uvm_info(`gfn, $sformatf("%s reg is checked with expected value %0h",
       //                            csr_name, csr.get_mirrored_value()), UVM_LOW)
-      //  `DV_CHECK_EQ(csr.get_mirrored_value(), item.d_data, csr_name)
+      //  `DV_CHECK_EQ(item.d_data, csr.get_mirrored_value(), csr_name)
       // end
       void'(csr.predict(.value(item.d_data), .kind(UVM_PREDICT_READ)));
     end
@@ -351,15 +371,17 @@ class hmac_scoreboard extends cip_base_scoreboard #(.CFG_T (hmac_env_cfg),
 
   virtual function void reset(string kind = "HARD");
     super.reset(kind);
-    flush();
-    sha_en     = 0;
-    fifo_empty = 0;
-    hmac_start = 0;
 
-    key             = '{default:0};
-    key_length      = 5'b0_0001;
-    digest_size     = 4'b0001;
-    exp_digest      = '{default:0};
+    if (cfg.en_cov) cov.trig_rst_during_hash_cg.sample(hmac_process);
+
+    flush();
+    key         = '{default:0};
+    exp_digest  = '{default:0};
+    fifo_empty  = ral.status.fifo_empty.get_reset();
+    hmac_start  = ral.cmd.hash_start.get_reset();
+    sha_en      = ral.cfg.sha_en.get_reset();
+    key_length  = ral.cfg.key_length.get_reset();
+    digest_size = ral.cfg.digest_size.get_reset();
     msg_q.delete();
     cfg.wipe_secret_triggered = 0;
   endfunction
