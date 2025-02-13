@@ -5,13 +5,23 @@
 class ac_range_check_common_vseq extends ac_range_check_base_vseq;
   `uvm_object_utils(ac_range_check_common_vseq)
 
-  constraint num_trans_c {
-    num_trans inside {[1:2]};
-  }
-  `uvm_object_new
+  // Constraints
+  extern constraint num_trans_c;
 
-  virtual task body();
-    run_common_vseq_wrapper(num_trans);
-  endtask : body
+  // Standard SV/UVM methods
+  extern function new(string name="");
+  extern task body();
+endclass : ac_range_check_common_vseq
 
-endclass
+
+constraint ac_range_check_common_vseq::num_trans_c {
+  num_trans inside {[1:2]};
+}
+
+function ac_range_check_common_vseq::new(string name="");
+  super.new(name);
+endfunction : new
+
+task ac_range_check_common_vseq::body();
+  run_common_vseq_wrapper(num_trans);
+endtask : body
