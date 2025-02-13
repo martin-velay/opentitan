@@ -15,19 +15,20 @@ module tb;
 
   wire clk, rst_n;
   wire [NUM_MAX_INTERRUPTS-1:0] interrupts;
-  wire rst_shadowed_n;        // TODO MVy - assign to something
-  wire racl_policies;         // TODO MVy - assign to something
-  wire racl_error;            // TODO MVy - assign to something
-  wire racl_error_log;        // TODO MVy - assign to something
-  wire intr_deny_cnt_reached; // TODO MVy - assign to something
-  wire range_check_overwrite; // TODO MVy - assign to something
+  wire rst_shadowed_n;
+  wire racl_policies;
+  wire racl_error;
+  wire racl_error_log;
+  wire intr_deny_cnt_reached;
+  wire range_check_overwrite;
 
   // Interfaces
-  pins_if    #(NUM_MAX_INTERRUPTS) intr_if (interrupts);
-  clk_rst_if clk_rst_if   (.clk(clk), .rst_n(rst_n));
-  tl_if      tl_csr_if    (.clk(clk), .rst_n(rst_n));
-  tl_if      tl_unfilt_if (.clk(clk), .rst_n(rst_n));
-  tl_if      tl_filt_if   (.clk(clk), .rst_n(rst_n));
+  pins_if #(NUM_MAX_INTERRUPTS) intr_if (interrupts);
+  clk_rst_if      clk_rst_if    (.clk(clk), .rst_n(rst_n));
+  rst_shadowed_if rst_shad_if   (.rst_n(rst_n), .rst_shadowed_n(rst_shadowed_n));
+  tl_if           tl_csr_if     (.clk(clk), .rst_n(rst_n));
+  tl_if           tl_unfilt_if  (.clk(clk), .rst_n(rst_n));
+  tl_if           tl_filt_if    (.clk(clk), .rst_n(rst_n));
 
   `DV_ALERT_IF_CONNECT()
 
@@ -64,12 +65,21 @@ module tb;
     .ctn_filtered_tl_d2h_i    (tl_filt_if.d2h         )
   );
 
+  // Manage inputs
+  // TODO should be driven dynamically by an io_agent (to be created TODO MVy)
+  assign range_check_overwrite  = prim_mubi_pkg::MuBi8False;
+  assign racl_policies          = top_racl_pkg::RACL_POLICY_VEC_DEFAULT;
+
+  // Manage outputs
   assign interrupts[DenyCntReached] = intr_deny_cnt_reached;
+  // TODO should be monitored dynamically by an io_agent (to be created TODO MVy)
+  // assign io_if.racl_error          = racl_error;
+  // assign io_if.racl_error_log      = racl_error_log;
 
   initial begin
-    // Drive clk and rst_n from clk_if
     clk_rst_if.set_active();
     uvm_config_db#(virtual clk_rst_if)::set(null, "*.env", "clk_rst_vif", clk_rst_if);
+    uvm_config_db#(virtual rst_shadowed_if)::set(null, "*.env", "rst_shadowed_vif", rst_shad_if);
     uvm_config_db#(intr_vif)::set(null, "*.env", "intr_vif", intr_if);
     uvm_config_db#(virtual tl_if)::set(null, "*.env.tl_csr_agt*", "tl_csr_vif", tl_csr_if);
     uvm_config_db#(virtual tl_if)::set(null, "*.env.tl_unfilt_agt*", "tl_unfilt_vif", tl_unfilt_if);
