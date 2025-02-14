@@ -2,11 +2,12 @@ CAPI=2:
 # Copyright lowRISC contributors (OpenTitan project).
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-name: "lowrisc:dv:ac_range_check_sva:0.1"
+name: ${instance_vlnv("lowrisc:dv:ac_range_check_sva:0.1")}
 description: "AC_RANGE_CHECK assertion modules and bind file."
 filesets:
   files_dv:
     depend:
+      - ${instance_vlnv("lowrisc:ip:ac_range_check_pkg")}
       - lowrisc:tlul:headers
       - lowrisc:fpv:csr_assert_gen
     files:
@@ -15,7 +16,7 @@ filesets:
 
   files_formal:
     depend:
-      - lowrisc:ip:ac_range_check
+      - ${instance_vlnv("lowrisc:ip:ac_range_check")}
 
 generate:
   csr_assert_gen:
@@ -29,6 +30,7 @@ targets:
       - files_dv
     generate:
       - csr_assert_gen
+
   formal:
     <<: *default_target
     filesets:
