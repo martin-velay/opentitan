@@ -13,14 +13,15 @@ module tb;
   `include "uvm_macros.svh"
   `include "dv_macros.svh"
 
-  wire clk, rst_n;
-  wire [NUM_MAX_INTERRUPTS-1:0] interrupts;
-  wire rst_shadowed_n;
-  wire racl_policies;
-  wire racl_error;
-  wire racl_error_log;
-  wire intr_deny_cnt_reached;
-  wire range_check_overwrite;
+  wire                                  clk;
+  wire                                  rst_n;
+  wire [NUM_MAX_INTERRUPTS-1:0]         interrupts;
+  wire                                  rst_shadowed_n;
+  wire top_racl_pkg::racl_policy_vec_t  racl_policies;
+  wire                                  racl_error;
+  wire top_racl_pkg::racl_error_log_t   racl_error_log;
+  wire                                  intr_deny_cnt_reached;
+  wire prim_mubi_pkg::mubi8_t           range_check_overwrite;
 
   // Interfaces
   pins_if #(NUM_MAX_INTERRUPTS) intr_if (interrupts);
