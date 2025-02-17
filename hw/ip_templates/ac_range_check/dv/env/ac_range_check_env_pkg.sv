@@ -19,7 +19,6 @@ package ac_range_check_env_pkg;
   `include "dv_macros.svh"
 
   // Parameters
-  // TODO MVy check order is correct
   parameter uint   NUM_ALERTS = 2;
   parameter string LIST_OF_ALERTS[] = {"recov_ctrl_update_err", "fatal_fault"};
 
