@@ -14,14 +14,14 @@ class ac_range_check_base_vseq extends cip_base_vseq #(
   bit do_ac_range_check_init = 1'b1;
 
   // Randomized variables
-  rand bit [TL_DW-3:0] range_base[NUM_RANGES];  // Granularity is 32-bit words
-  rand bit [TL_DW-3:0] range_limit[NUM_RANGES]; // Granularity is 32-bit words
+  rand tl_main_vars_t  tl_main_vars;
+  rand bit [TL_DW-1:0] range_base[NUM_RANGES];  // Granularity is 32-bit words, 2-LSBs are ignored
+  rand bit [TL_DW-1:0] range_limit[NUM_RANGES]; // Granularity is 32-bit words, 2-LSBs are ignored
   rand range_perm_t    range_perm[NUM_RANGES];
   rand racl_policy_t   range_racl_policy[NUM_RANGES];
 
   // Constraints
-  extern constraint range_limit_c;
-  extern constraint range_racl_policy_c;
+  extern constraint tl_main_vars_c;
 
   // Standard SV/UVM methods
   extern function new(string name="");
@@ -33,21 +33,17 @@ class ac_range_check_base_vseq extends cip_base_vseq #(
   extern task cfg_range_limit();
   extern task cfg_range_perm();
   extern task cfg_range_racl_policy();
+  extern task send_single_tl_unfilt_tr(tl_main_vars_t main_vars);
 endclass : ac_range_check_base_vseq
 
 
-constraint ac_range_check_base_vseq::range_limit_c {
-  solve range_base before range_limit;
-  foreach (range_limit[i]) {
-    range_limit[i] > range_base[i];
-  }
-}
-
-constraint ac_range_check_base_vseq::range_racl_policy_c {
-  foreach (range_racl_policy[i]) {
-    soft range_racl_policy[i].write_perm == 16'hFFFF;
-    soft range_racl_policy[i].read_perm  == 16'hFFFF;
-  }
+// Keep the TL transactions randomized by default, this can be overridden easily by derived
+// sequences if needed as declared as soft constraints.
+constraint ac_range_check_base_vseq::tl_main_vars_c {
+  soft tl_main_vars.rand_write == 1;
+  soft tl_main_vars.rand_addr  == 1;
+  soft tl_main_vars.rand_mask  == 1;
+  soft tl_main_vars.rand_data  == 1;
 }
 
 function ac_range_check_base_vseq::new(string name="");
@@ -70,14 +66,14 @@ endtask : ac_range_check_init
 
 task ac_range_check_base_vseq::cfg_range_base();
   foreach (range_base[i]) begin
-    ral.range_base[i].set({range_base[i], 2'b00});
+    ral.range_base[i].set(range_base[i]);
     csr_update(.csr(ral.range_base[i]));
   end
 endtask : cfg_range_base
 
 task ac_range_check_base_vseq::cfg_range_limit();
   foreach (range_limit[i]) begin
-    ral.range_limit[i].set({range_limit[i], 2'b00});
+    ral.range_limit[i].set(range_limit[i]);
     csr_update(.csr(ral.range_limit[i]));
   end
 endtask : cfg_range_limit
@@ -102,3 +98,21 @@ task ac_range_check_base_vseq::cfg_range_racl_policy();
     csr_update(.csr(ral.range_racl_policy_shadowed[i]));
   end
 endtask : cfg_range_racl_policy
+
+task ac_range_check_base_vseq::send_single_tl_unfilt_tr(tl_main_vars_t main_vars);
+  tl_host_single_seq seq;
+  `uvm_create_on(seq, p_sequencer.tl_unfilt_sqr)
+  `DV_CHECK_RANDOMIZE_WITH_FATAL( seq,
+                                  (!main_vars.rand_write) -> (write == main_vars.write);
+                                  (!main_vars.rand_addr ) -> (addr  == main_vars.addr);
+                                  (!main_vars.rand_mask ) -> (mask  == main_vars.mask);
+                                  (!main_vars.rand_data ) -> (data  == main_vars.data);)
+
+  csr_utils_pkg::increment_outstanding_access();
+  `DV_SPINWAIT(`uvm_send(seq), "Timed out when sending fetch request")
+  csr_utils_pkg::decrement_outstanding_access();
+
+  // At this point, the TL transaction should have completed and the response will be in seq.rsp.
+  // The fetch was successful if d_error is false.
+  `DV_CHECK(!seq.rsp.d_error, "Single TL unfiltered transaction failed")
+endtask : send_single_tl_unfilt_tr
